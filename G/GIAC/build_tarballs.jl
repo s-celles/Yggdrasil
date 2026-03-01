@@ -104,7 +104,9 @@ elif [[ "${target}" == x86_64-apple-* ]]; then
   cd src
   make -j${nproc} libgiac.la libxcas.la icas.o xcas.o aide.o
   cd .libs
-  g++ ${GIAC_CXXFLAGS} -dynamiclib -o libgiac.0.dylib ${GIAC_OBJS} -lintl -lpthread -lm -lmpfr -lgmp -install_name ${prefix}/lib/libgiac.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
+  # GIAC has unguarded LAPACK symbols in vecteur.o; macOS ld is strict about missing symbols.
+  # Use -framework Accelerate to satisfy them (provides BLAS/LAPACK).
+  g++ ${GIAC_CXXFLAGS} -dynamiclib -o libgiac.0.dylib ${GIAC_OBJS} -lintl -lpthread -lm -lmpfr -lgmp -framework Accelerate -install_name ${prefix}/lib/libgiac.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
   g++ ${GIAC_CXXFLAGS} -dynamiclib -o libxcas.0.dylib ${XCAS_OBJS} -L. -lgiac -lintl -lpthread -lm -lmpfr -lgmp -install_name ${prefix}/lib/libxcas.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
   cd ..
   /usr/bin/install -c .libs/libxcas.0.dylib /workspace/destdir/lib/libxcas.0.dylib
@@ -121,7 +123,7 @@ elif [[ "${target}" == aarch64-apple-* ]]; then
   cd src
   make -j${nproc} libgiac.la libxcas.la icas.o xcas.o aide.o
   cd .libs
-  g++ ${GIAC_CXXFLAGS} -dynamiclib -o libgiac.0.dylib ${GIAC_OBJS} -lintl -lpthread -lm -lmpfr -lgmp -install_name ${prefix}/lib/libgiac.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
+  g++ ${GIAC_CXXFLAGS} -dynamiclib -o libgiac.0.dylib ${GIAC_OBJS} -lintl -lpthread -lm -lmpfr -lgmp -framework Accelerate -install_name ${prefix}/lib/libgiac.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
   g++ ${GIAC_CXXFLAGS} -dynamiclib -o libxcas.0.dylib ${XCAS_OBJS} -L. -lgiac -lintl -lpthread -lm -lmpfr -lgmp -install_name ${prefix}/lib/libxcas.0.dylib -current_version 0.0.0 -compatibility_version 0.0.0
   cd ..
   /usr/bin/install -c .libs/libxcas.0.dylib /workspace/destdir/lib/libxcas.0.dylib
