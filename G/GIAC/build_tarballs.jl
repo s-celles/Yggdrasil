@@ -20,20 +20,45 @@ if [[ "${target}" == *-mingw* ]]; then
 fi
 
 update_configure_scripts
-autoreconf -vif
+autoreconf -fi
 
-export CC=gcc
-export CFLAGS="-g -fPIC -DGIAC_JULIA -DUSE_OBJET_BIDON -fno-strict-aliasing -DGIAC_GENERIC_CONSTANTS -DTIMEOUT"
-export CXX=g++
-export CXXFLAGS="${CFLAGS} -U_GLIBCXX_ASSERTIONS"
+# Use GCC on macOS/FreeBSD to avoid clang+libtool linking issues
+if [[ "${target}" == *freebsd* ]] || [[ "${target}" == *-apple-* ]]; then
+    export CC=gcc
+    export CXX=g++
+fi
 
 ./configure --prefix=${prefix} \
     --build=${MACHTYPE} \
     --host=${target} \
     --disable-rpath \
     --enable-shared \
+    --disable-static \
+    --enable-gettext \
+    --disable-gui \
     --disable-fltk \
-    --disable-micropy
+    --disable-ao \
+    --disable-micropy \
+    --disable-quickjs \
+    --disable-libbf \
+    --disable-pari \
+    --disable-ntl \
+    --disable-ecm \
+    --disable-cocoa \
+    --disable-samplerate \
+    --disable-curl \
+    --disable-glpk \
+    --disable-gsl \
+    --disable-lapack \
+    --disable-png
+
+export CXXFLAGS="-g -fPIC -DGIAC_JULIA -U_GLIBCXX_ASSERTIONS -DUSE_OBJET_BIDON -fno-strict-aliasing -DGIAC_GENERIC_CONSTANTS -DTIMEOUT"
+
+# Fix libtool bugs in the generated script:
+# 1. func__fatal_error typo (double underscore) should be func_fatal_error
+# 2. hardcode_shlibpath_var=unsupported causes fatal error on macOS/FreeBSD with GCC
+sed -i 's/func__fatal_error/func_fatal_error/g' libtool
+sed -i 's/hardcode_shlibpath_var=unsupported/hardcode_shlibpath_var=no/g' libtool
 
 make -j${nproc}
 make install
@@ -41,7 +66,7 @@ make install
 
 # Build for all supported platforms
 platforms = supported_platforms()
-#platforms = expand_cxxstring_abis(platforms)
+platforms = expand_cxxstring_abis(platforms)
 
 # The products that we will ensure are always built
 products = [
