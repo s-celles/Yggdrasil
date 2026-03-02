@@ -13,14 +13,6 @@ sources = [
 
 # Bash recipe for building across all platforms
 script = raw"""
-if [[ "${target}" == *-mingw* ]]; then
-    cd $WORKSPACE/srcdir/tcl/win/
-    # `make install` calls `tclsh` on Windows
-    apk add tcl
-else
-    cd $WORKSPACE/srcdir/tcl/unix/
-fi
-
 # musl needs bsd-compat-headers for sys/queue.h
 # Copy header to sysroot since cross-compiler doesn't see /usr/include
 if [[ "${target}" == *-musl* ]]; then
@@ -28,20 +20,65 @@ if [[ "${target}" == *-musl* ]]; then
     cp /usr/include/sys/queue.h /opt/${target}/${target}/sys-root/usr/include/sys/
 fi
 
-FLAGS=(--enable-threads --disable-rpath)
+FLAGS=(--disable-zipfs --enable-threads --disable-rpath)
+
 if [[ "${target}" == x86_64-* ]] || [[ "${target}" == aarch64-* ]]; then
     FLAGS+=(--enable-64bit)
 fi
-# musl libc has a working strtod, so disable the fixstrtod workaround
-# that causes "multiple definition of fixstrtod" linker errors
-if [[ "${target}" == *-musl* ]]; then
-    export tcl_cv_strtod_buggy=ok
+
+if [[ "${target}" == *-mingw* ]]; then
+    # `make install` calls `tclsh` on Windows
+    apk add tcl
+
+    # The pre-built libtommath and zlib DLLs in the Tcl source tree were compiled
+    # with MSVC (UCRT) but tcl90.dll is cross-compiled with MinGW (msvcrt),
+    # causing C runtime mismatch crashes. Fix:
+    #  - Cross-compile libtommath from source.
+    #  - Use Zlib_jll's zlib (available on the DLL search path at runtime).
+
+    # Cross-compile libtommath from source.
+    cd $WORKSPACE/srcdir/tcl/libtommath
+    TOMMATH_CFLAGS="-O2 -I. -DTCL_WITH_EXTERNAL_TOMMATH"
+    if [[ "${target}" == x86_64-* ]] || [[ "${target}" == aarch64-* ]]; then
+        TOMMATH_CFLAGS="${TOMMATH_CFLAGS} -DMP_64BIT"
+    fi
+    ${CC} ${TOMMATH_CFLAGS} -shared -o libtommath.dll bn_*.c \
+        -Wl,--out-implib,libtommath.dll.a
+    # Replace pre-built MSVC libtommath and zlib with cross-compiled / Zlib_jll versions.
+    # The MSVC import libraries point to zlib1.dll; Zlib_jll's points to libz.dll.
+    # Configure sets ZLIB_LIBS per target: win64/libz.dll.a, win64-arm/libz.dll.a,
+    # or win32/zdll.lib (no GCC branch for 32-bit in upstream configure).
+    if [[ "${target}" == aarch64-*mingw* ]]; then
+        cp -f libtommath.dll libtommath.dll.a win64-arm/
+        cp -f ${prefix}/lib/libz.dll.a $WORKSPACE/srcdir/tcl/compat/zlib/win64-arm/libz.dll.a
+    elif [[ "${target}" == x86_64-*mingw* ]]; then
+        cp -f libtommath.dll libtommath.dll.a win64/
+        cp -f ${prefix}/lib/libz.dll.a $WORKSPACE/srcdir/tcl/compat/zlib/win64/libz.dll.a
+    elif [[ "${target}" == i686-*mingw* ]]; then
+        cp -f libtommath.dll libtommath.dll.a win32/
+        cp -f ${prefix}/lib/libz.dll.a $WORKSPACE/srcdir/tcl/compat/zlib/win32/zdll.lib
+    fi
+
+    cd $WORKSPACE/srcdir/tcl/win/
+    ./configure --prefix=${prefix} --build=${MACHTYPE} --host=${target} "${FLAGS[@]}"
+
+    # Disable the zlib1.dll copy target; we use libz.dll from Zlib_jll instead.
+    sed -i 's/^ZLIB_DLL_FILE.*/ZLIB_DLL_FILE =/' Makefile
+
+    make -j${nproc}
+    make install
+    make install-private-headers
+
+    # Remove leftover zlib files; Zlib_jll provides libz.dll at runtime.
+    rm -f ${bindir}/zlib1.dll ${prefix}/lib/libz.dll.a
+else
+    cd $WORKSPACE/srcdir/tcl/unix/
+    ./configure --prefix=${prefix} --build=${MACHTYPE} --host=${target} "${FLAGS[@]}"
+    make -j${nproc}
+    make install
+    # Tk needs private headers
+    make install-private-headers
 fi
-./configure --prefix=${prefix} --build=${MACHTYPE} --host=${target} "${FLAGS[@]}"
-make -j${nproc}
-make install
-# Tk needs private headers
-make install-private-headers
 
 # Install license file
 install_license $WORKSPACE/srcdir/tcl/license.terms
@@ -63,4 +100,4 @@ dependencies = [
 
 # Build the tarballs, and possibly a `build.jl` as well.
 build_tarballs(ARGS, name, version, sources, script, platforms, products, dependencies,
-               julia_compat="1.6")
+               preferred_gcc_version=v"5", julia_compat="1.6")
