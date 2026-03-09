@@ -98,8 +98,8 @@ products = [
 # Dependencies that must be installed before this package can be built
 dependencies = [
     BuildDependency(PackageSpec(;name="libjulia_jll", version="1.11.0")),
-    Dependency("GMP_jll"; compat="6.2.1"),
-    Dependency("MPFR_jll"; compat="4.2.0"),
+    Dependency("GMP_jll"; compat="6.2"),
+    Dependency("MPFR_jll"; compat="4.2"),
     Dependency("libcxxwrap_julia_jll"; compat = "~0.14.9"),
     Dependency("GIAC_jll"; compat = "~2.0.0"),
 ]
