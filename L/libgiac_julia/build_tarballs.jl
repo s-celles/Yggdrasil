@@ -44,8 +44,8 @@ if [[ "${target}" == *-apple-* ]] || [[ "${target}" == *freebsd* ]]; then
 
     echo "=== Building C-ABI shim with g++ ==="
 
-    # Find g++ cross-compiler (BinaryBuilder provides it as ${target}-g++)
-    GCC_CXX="${target}-g++"
+    # Use g++ instead of clang++
+    GCC_CXX="g++"
 
     # Build shared libgiac_cabi with g++ (resolves all libstdc++/libgcc internally)
     ${GCC_CXX} -shared -std=c++14 -O2 -fPIC \
@@ -100,7 +100,6 @@ dependencies = [
     BuildDependency(PackageSpec(;name="libjulia_jll", version="1.11.0")),
     Dependency("GMP_jll"; compat="6.2.1"),
     Dependency("MPFR_jll"; compat="4.1.1"),
-    Dependency("libcxxwrap_julia_jll"; compat = "~0.14.9"),
     Dependency("GIAC_jll"; compat = "~2.0.0"),
 ]
 
