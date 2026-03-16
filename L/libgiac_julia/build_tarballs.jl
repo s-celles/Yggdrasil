@@ -63,6 +63,9 @@ if [[ "${target}" == *-apple-* ]] || [[ "${target}" == *freebsd* ]]; then
     CABI_CMAKE_ARGS="-DUSE_GIAC_CABI=ON -DGIAC_CABI_LIBRARY=${libdir}/libgiac_cabi.${dlext}"
 fi
 
+# Remove macOS resource fork files (._*) that break CMake module parsing
+find /usr/share/cmake -name '._*' -delete 2>/dev/null || true
+
 # Build with CMake
 cmake -B build \
    -DJulia_PREFIX="${prefix}" \
@@ -98,9 +101,10 @@ products = [
 # Dependencies that must be installed before this package can be built
 dependencies = [
     BuildDependency(PackageSpec(;name="libjulia_jll", version="1.11.0")),
-    Dependency("GMP_jll"; compat="6.2.1"),
-    Dependency("MPFR_jll"; compat="4.1.1"),
-    Dependency("GIAC_jll"; compat = "~2.0.0"),
+    Dependency("libcxxwrap_julia_jll"),
+    Dependency("GMP_jll", v"6.2.1"),
+    Dependency("MPFR_jll", v"4.1.1"),
+    Dependency("GIAC_jll", v"2.0.0"),
 ]
 
 # Build the tarballs, and possibly a `build.jl` as well.
