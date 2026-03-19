@@ -4,13 +4,13 @@ using BinaryBuilder, Pkg
 using Base.BinaryPlatforms
 
 name = "libgiac_julia"
-version = v"0.4.0"
+version = v"0.5.0"
 
 # Collection of sources required to build libgiac_julia
 sources = [
     GitSource(
         "https://github.com/s-celles/libgiac-julia-wrapper.git",
-        "6252612f39277a83b56cfd14bb40175700d22668"
+        "490207923b75678ace5409e16ed5bc134bd9c7d9"
     ),
 ]
 
@@ -18,68 +18,47 @@ sources = [
 script = raw"""
 cd $WORKSPACE/srcdir/libgiac-julia-wrapper
 
-# Help CMake find GIAC
-export GIAC_ROOT="${prefix}"
+# CMake is needed by meson to find JlCxx (libcxxwrap-julia)
+apk add cmake
 
-# On Windows, ${libdir} points to bin/; import libraries (.dll.a) are in ${prefix}/lib/
-GIAC_LIB="${libdir}/libgiac.${dlext}"
-GMP_LIB="${libdir}/libgmp.${dlext}"
-if [[ "${target}" == *mingw* ]]; then
-    GIAC_LIB="${prefix}/lib/libgiac.dll.a"
-    GMP_LIB="${prefix}/lib/libgmp.dll.a"
+# Meson cross-compilation setup
+# Use the GCC variant of the toolchain for C++ ABI compatibility with GIAC_jll
+if [[ -f "${MESON_TARGET_TOOLCHAIN%.*}_gcc.meson" ]]; then
+    MESON_CROSS="${MESON_TARGET_TOOLCHAIN%.*}_gcc.meson"
+else
+    MESON_CROSS="${MESON_TARGET_TOOLCHAIN}"
 fi
 
-# Extra CMake args for C-ABI mode (macOS/FreeBSD only)
-CABI_CMAKE_ARGS=""
+# Inject cmake path into the cross-file so meson can find JlCxx
+CMAKE_PATH=$(which cmake)
+sed -i "/^\[binaries\]/a cmake = '${CMAKE_PATH}'" "${MESON_CROSS}"
 
-if [[ "${target}" == *-apple-* ]] || [[ "${target}" == *freebsd* ]]; then
-    # On macOS/FreeBSD, GIAC_jll is built with g++/libstdc++ while
-    # libcxxwrap_julia_jll uses clang++/libc++. The std::string types are
-    # ABI-incompatible. We use a dual-compiler approach:
-    #   1. Compile giac_impl.cpp + giac_cabi.cpp with g++ -> libgiac_cabi.dylib
-    #   2. Compile giac_wrapper.cpp with clang++ (default) + USE_GIAC_CABI
-    # The C-ABI shim bridges the two with extern "C" functions.
-    # Building libgiac_cabi as a shared library lets g++ resolve its own
-    # libstdc++ and libgcc, avoiding platform tag and search path issues.
+# Tell meson where to find JlCxx (libcxxwrap-julia) via CMake
+# and where GIAC headers are installed
+# Pass Julia headers include path via meson cpp_args (cross builds ignore env CXXFLAGS)
+meson setup builddir \
+    --cross-file="${MESON_CROSS}" \
+    --prefix="${prefix}" \
+    --buildtype=release \
+    -Dgiac_include_dir="${includedir}/giac" \
+    -Dcpp_args="-I${includedir}/julia -I${includedir}/giac" \
+    --cmake-prefix-path="${prefix}"
 
-    echo "=== Building C-ABI shim with g++ ==="
+# Only build the wrapper library (skip tests - they require a running Julia)
+meson compile -C builddir -j${nproc} giac_wrapper
 
-    # Use g++ instead of clang++
-    GCC_CXX="g++"
-
-    # Build shared libgiac_cabi with g++ (resolves all libstdc++/libgcc internally)
-    ${GCC_CXX} -shared -std=c++14 -O2 -fPIC \
-        -I${includedir}/giac \
-        -I${includedir}/giac/giac \
-        -I${prefix}/include \
-        -Isrc \
-        src/giac_impl.cpp \
-        src/giac_cabi.cpp \
-        -L${libdir} -lgiac -lgmp \
-        -o ${libdir}/libgiac_cabi.${dlext}
-
-    echo "=== C-ABI shim built: ${libdir}/libgiac_cabi.${dlext} ==="
-
-    CABI_CMAKE_ARGS="-DUSE_GIAC_CABI=ON -DGIAC_CABI_LIBRARY=${libdir}/libgiac_cabi.${dlext}"
+# Install manually (meson install rebuilds all targets including tests)
+mkdir -p ${libdir}
+find builddir/src -maxdepth 1 -name "libgiac_wrapper*" -type f -exec cp {} ${libdir}/ \;
+# Create soname symlinks
+cd ${libdir}
+if [[ -f libgiac_wrapper.so.0.5.0 ]]; then
+    ln -sf libgiac_wrapper.so.0.5.0 libgiac_wrapper.so.0
+    ln -sf libgiac_wrapper.so.0 libgiac_wrapper.so
 fi
-
-# Remove macOS resource fork files (._*) that break CMake module parsing
-find /usr/share/cmake -name '._*' -delete 2>/dev/null || true
-
-# Build with CMake
-cmake -B build \
-   -DJulia_PREFIX="${prefix}" \
-   -DGIAC_INCLUDE_DIR="${includedir}/giac" \
-   -DGIAC_LIBRARY="${GIAC_LIB}" \
-   -DGMP_LIBRARY="${GMP_LIB}" \
-   -DCMAKE_INSTALL_PREFIX="${prefix}" \
-   -DCMAKE_FIND_ROOT_PATH="${prefix}" \
-   -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TARGET_TOOLCHAIN}" \
-   -DCMAKE_BUILD_TYPE=Release \
-   ${CABI_CMAKE_ARGS}
-
-cmake --build build --config Release --target giac_wrapper -- -j${nproc}
-cmake --install build
+cd -
+mkdir -p ${includedir}/giac_julia
+cp src/giac_impl.h ${includedir}/giac_julia/
 
 install_license LICENSE
 """
@@ -90,9 +69,6 @@ include("../../L/libjulia/common.jl")
 platforms = vcat(libjulia_platforms.(julia_versions)...)
 platforms = expand_cxxstring_abis(platforms)
 
-# All platforms supported: macOS/FreeBSD use C-ABI shim to bridge
-# g++ (GIAC_jll) and clang++ (libcxxwrap_julia_jll) ABI mismatch
-
 # The products that we will ensure are always built
 products = [
     LibraryProduct("libgiac_wrapper", :libgiac_wrapper),
@@ -100,13 +76,15 @@ products = [
 
 # Dependencies that must be installed before this package can be built
 dependencies = [
-    BuildDependency(PackageSpec(;name="libjulia_jll", version="1.11.0")),
+    BuildDependency(PackageSpec(;name="libjulia_jll", version=v"1.11.0+0")),
     Dependency("libcxxwrap_julia_jll"),
+    Dependency("Gettext_jll"; compat="0.21.0"),
     Dependency("GMP_jll"; compat="6.2.1"),
     Dependency("MPFR_jll"; compat="4.1.1"),
-    Dependency("GIAC_jll"; compat="2.0.0"),
+    Dependency("Readline_jll"; compat="8.2.13"),
+    Dependency("GIAC_jll"; compat="2.0.1"),
 ]
 
 # Build the tarballs, and possibly a `build.jl` as well.
 build_tarballs(ARGS, name, version, sources, script, platforms, products, dependencies;
-    preferred_gcc_version=v"10", julia_compat=libjulia_julia_compat(julia_versions))
+    preferred_gcc_version=v"9", julia_compat=libjulia_julia_compat(julia_versions))
