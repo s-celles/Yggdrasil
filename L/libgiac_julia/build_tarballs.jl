@@ -42,6 +42,7 @@ meson setup builddir \
     --buildtype=release \
     -Dgiac_include_dir="${includedir}/giac" \
     -Dcpp_args="-I${includedir}/julia -I${includedir}/giac" \
+    -Dcpp_link_args="-L${libdir}" \
     --cmake-prefix-path="${prefix}"
 
 # Only build the wrapper library (skip tests - they require a running Julia)
@@ -50,11 +51,13 @@ meson compile -C builddir -j${nproc} giac_wrapper
 # Install manually (meson install rebuilds all targets including tests)
 mkdir -p ${libdir}
 find builddir/src -maxdepth 1 -name "libgiac_wrapper*" -type f -exec cp {} ${libdir}/ \;
-# Create soname symlinks
+# Create soname/version symlinks
 cd ${libdir}
 if [[ -f libgiac_wrapper.so.0.5.0 ]]; then
     ln -sf libgiac_wrapper.so.0.5.0 libgiac_wrapper.so.0
     ln -sf libgiac_wrapper.so.0 libgiac_wrapper.so
+elif [[ -f libgiac_wrapper.0.dylib ]]; then
+    ln -sf libgiac_wrapper.0.dylib libgiac_wrapper.dylib
 fi
 cd -
 mkdir -p ${includedir}/giac_julia
