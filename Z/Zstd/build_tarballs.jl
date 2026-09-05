@@ -30,7 +30,10 @@ elif [[ "${target}" == i686-*-mingw* ]]; then
     sed -ri "s/^c_args = \[(.*)\]/c_args = [\1, '-D_WIN32_WINNT=_WIN32_WINNT_VISTA']/" ${MESON_TARGET_TOOLCHAIN}
 fi
 
-meson --cross-file="${MESON_TARGET_TOOLCHAIN}" ../build/meson
+# Ship the static archive alongside the shared library. Recipes that link zstd into a fully
+# static binary have no other source for it: the meson build defaults to shared only, so
+# libzstd.a is simply absent from the artifact today.
+meson --cross-file="${MESON_TARGET_TOOLCHAIN}" --default-library=both ../build/meson
 
 # Meson beautifully forces thin archives, without checking whether the dynamic linker
 # actually supports them: <https://github.com/mesonbuild/meson/issues/10823>.  Let's remove
