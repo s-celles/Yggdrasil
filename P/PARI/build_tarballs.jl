@@ -19,14 +19,20 @@ version = v"2.19.1"
 # `compat="~200.1900.100"`. The JLL patch level can then be bumped for
 # rebuilds, and a rebuild that breaks ABI without an upstream change can bump
 # the minor version (200.1900.100 -> 200.1901.100).
+#
+# offset: bump for rebuilds of the same upstream release, reset to 0 on a new
+# one. 1: adds the libpari_trap product (200.1900.101).
+offset = 1
 ygg_version = VersionNumber(100 * version.major, 100 * version.minor,
-                            100 * version.patch)
+                            100 * version.patch + offset)
 
 sources = [
     ArchiveSource(
         "https://pari.math.u-bordeaux.fr/pub/pari/unix/pari-$(version).tar.gz",
         "419553b11ff8c3ecb8e9031b7d91d7cee003a5d721e685fcb499565c96fe2943",
     ),
+    # libpari_trap.c, see below.
+    DirectorySource("./bundled"),
 ]
 
 # Bash recipe for building across all platforms
@@ -109,6 +115,23 @@ make -j${nproc} gp
 make install
 make install-lib-dyn
 
+# libpari_trap: a small trampoline for programs that embed libpari, from
+# LibPARI.jl. It arms pari_CATCH in a real C frame around a call to a libpari
+# function, so that a PARI error longjmps across C frames only and comes back
+# as an error number: a host language runtime (e.g. Julia's) cannot have
+# PARI's longjmp unwind its own frames. Embedders otherwise have to compile it
+# at load time, which needs a C compiler (often missing on Windows).
+# On Windows libpari reaches its thread-locals (iferr_env, ...) through
+# MinGW's emulated TLS from the shared libgcc: the trap must use the same
+# runtime (-shared-libgcc), or it would arm its own copy of iferr_env.
+trap_flags=""
+if [[ "${target}" == *-mingw* ]]; then
+    trap_flags="-shared-libgcc"
+fi
+${CC} -shared -fPIC -O2 ${trap_flags} -I${includedir} \
+    ${WORKSPACE}/srcdir/libpari_trap.c \
+    -o "${libdir}/libpari_trap.${dlext}" -L${libdir} -lpari
+
 install_license ${WORKSPACE}/srcdir/pari-*/COPYING
 """
 
@@ -127,6 +150,8 @@ products = [
     # release stops shipping it -- it is the source consumed by auto-generated
     # high-level wrappers (e.g. a Julia binding generator, like cypari2's).
     FileProduct("share/pari/pari.desc", :pari_desc),
+    # The error trampoline for embedders; see the script.
+    LibraryProduct("libpari_trap", :libpari_trap),
 ]
 
 # Dependencies that must be installed before this package can be built
